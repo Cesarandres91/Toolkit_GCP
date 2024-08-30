@@ -1,0 +1,73 @@
+Usando Google Apps Script:
+
+Ejecuta la consulta en BigQuery.
+Obtenga los resultados.
+Escriba estos resultados en una hoja de Google Sheets específica.
+
+ejemplo básico script:
+javascriptCopyfunction updateSheetFromBigQuery() {
+  // ID del proyecto de BigQuery
+  var projectId = 'tu-proyecto-id';
+  
+  // ID del conjunto de datos de BigQuery
+  var datasetId = 'tu-dataset-id';
+  
+  // Tu consulta SQL
+  var query = 'SELECT * FROM `tu-proyecto.tu-dataset.tu-tabla` LIMIT 1000';
+
+  // Ejecutar la consulta
+  var request = {
+    query: query,
+    useLegacySql: false
+  };
+  var queryResults = BigQuery.Jobs.query(request, projectId);
+
+  // Obtener los resultados
+  var jobId = queryResults.jobReference.jobId;
+  var rows = queryResults.rows;
+  while (queryResults.pageToken) {
+    queryResults = BigQuery.Jobs.getQueryResults(projectId, jobId, {
+      pageToken: queryResults.pageToken
+    });
+    rows = rows.concat(queryResults.rows);
+  }
+
+  // Preparar los datos para escribir en la hoja
+  var data = rows.map(function(row) {
+    return row.f.map(function(cell) {
+      return cell.v;
+    });
+  });
+
+  // ID de tu hoja de Google Sheets
+  var spreadsheetId = 'tu-spreadsheet-id';
+  
+  // Nombre de la hoja donde quieres escribir los datos
+  var sheetName = 'Nombre de tu hoja';
+
+  // Obtener la hoja
+  var sheet = SpreadsheetApp.openById(spreadsheetId).getSheetByName(sheetName);
+
+  // Limpiar la hoja existente
+  sheet.clear();
+
+  // Escribir los datos en la hoja
+  sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+}
+Para usar este script:
+
+Ve a tu Google Sheets.
+Haz clic en Herramientas > Editor de secuencia de comandos.
+Pega el script (modificando los IDs y la consulta según tus necesidades).
+Ejecuta la función updateSheetFromBigQuery().
+Usando la integración nativa de BigQuery con Google Sheets:
+
+Google ha introducido una integración nativa entre BigQuery y Google Sheets:
+
+En Google Sheets, ve a Datos > Conectar con datos > BigQuery.
+Selecciona tu proyecto, dataset y tabla, o escribe una consulta SQL personalizada.
+Los datos se cargarán en tu hoja y puedes configurar una actualización programada.
+
+Esta opción es más fácil de configurar, pero puede ser menos flexible que usar Apps Script.
+
+Usando herramientas de terceros:
