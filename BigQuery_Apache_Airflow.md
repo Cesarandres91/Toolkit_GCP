@@ -8,15 +8,15 @@ Primero, debes instalar Airflow en tu entorno. Esto se puede hacer de varias man
 
 ### Usando Docker:
 
-\`\`\`bash
+```bash
 docker-compose -f https://raw.githubusercontent.com/apache/airflow/main/docs/apache-airflow/start/docker-compose.yaml up -d
-\`\`\`
+```
 
 ### Instalación Local:
 
-\`\`\`bash
+```bash
 pip install apache-airflow
-\`\`\`
+```
 
 ## 2. Configuración de Airflow
 
@@ -27,9 +27,9 @@ Una vez instalado, debes configurar Airflow para que se conecte a tu proyecto de
 1. Crea un archivo JSON con las credenciales de tu cuenta de servicio de Google Cloud.
 2. Guarda el archivo en una ubicación segura y define la variable de entorno `GOOGLE_APPLICATION_CREDENTIALS` en tu máquina o servidor donde se ejecuta Airflow:
 
-\`\`\`bash
+```bash
 export GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/credentials.json"
-\`\`\`
+```
 
 ### Configura una Conexión en Airflow:
 
@@ -47,7 +47,7 @@ Crea un archivo Python en el directorio de DAGs de Airflow (normalmente en `/dag
 
 Un ejemplo de DAG que ejecuta una consulta en BigQuery todos los días a las 10:00 AM en la hora local de Chile se vería así:
 
-\`\`\`python
+```python
 from airflow import DAG
 from airflow.providers.google.cloud.operators.bigquery import BigQueryExecuteQueryOperator
 from airflow.utils.dates import days_ago
@@ -80,7 +80,7 @@ actualiza_tabla = BigQueryExecuteQueryOperator(
 
 # Define el flujo del DAG
 actualiza_tabla
-\`\`\`
+```
 
 ## 4. Verificar y Ejecutar
 
