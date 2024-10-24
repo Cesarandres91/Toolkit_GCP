@@ -1,0 +1,191 @@
+a) Código de conexión y consulta en Python:
+
+from google.cloud import bigquery
+import pandas as pd
+
+# Configurar el cliente de BigQuery
+client = bigquery.Client()
+
+# Definir la consulta SQL para obtener datos de BigQuery
+query = """
+SELECT
+  ID,
+  Cod_cliente,
+  Fecha,
+  SUM(numero_consultas) AS num_consultas
+FROM `tu_proyecto.FINANCE.BT`
+GROUP BY ID, Cod_cliente, Fecha
+ORDER BY Fecha;
+"""
+
+# Ejecutar la consulta y cargar los resultados en un DataFrame de Pandas
+df = client.query(query).to_dataframe()
+
+# Ver las primeras filas de los datos
+print(df.head())
+
+2. Preprocesamiento de datos
+
+# Asegurar que la columna Fecha sea de tipo datetime
+df['Fecha'] = pd.to_datetime(df['Fecha'])
+
+# Ordenar los datos por Fecha
+df = df.sort_values(by='Fecha')
+
+# Preprocesamiento: Normalización de los datos de 'num_consultas' (Estandarización)
+df['num_consultas_scaled'] = (df['num_consultas'] - df['num_consultas'].mean()) / df['num_consultas'].std()
+
+# Verificar el preprocesamiento
+print(df[['num_consultas', 'num_consultas_scaled']].head())
+
+3. Entrenamiento del modelo de detección de anomalías (Isolation Forest)
+
+from sklearn.ensemble import IsolationForest
+
+# Instanciar el modelo de Isolation Forest
+model = IsolationForest(contamination=0.01, random_state=42)
+
+# Entrenar el modelo usando la columna escalada
+df['anomaly'] = model.fit_predict(df[['num_consultas_scaled']])
+
+# El valor '-1' en 'anomaly' indica una anomalía, mientras que '1' es normal
+# Ver los resultados
+print(df[df['anomaly'] == -1])  # Mostrar solo las anomalías detectadas
+
+Aquí estamos usando el parámetro contamination=0.01, lo que significa que consideramos
+aproximadamente un 1% de los datos como anomalías. Este parámetro se puede ajustar según tus necesidades.
+
+4. Almacenar resultados en BigQuery
+
+Después de entrenar el modelo y detectar las anomalías, es importante almacenar los resultados para su posterior análisis. 
+Vamos a cargar los resultados nuevamente en BigQuery, creando una nueva tabla con los datos originales más la columna anomaly que indica si la fila es una anomalía o no.
+
+# Definir la tabla destino en BigQuery
+table_id = 'tu_proyecto.FINANCE.BT_anomalies'
+
+# Convertir el DataFrame a BigQuery
+df['Fecha'] = df['Fecha'].astype(str)  # Convertir fecha a string para cargar a BigQuery
+job = client.load_table_from_dataframe(df, table_id)
+
+# Esperar a que termine la carga de datos
+job.result()
+
+print(f"Carga completada. Los datos se almacenaron en {table_id}.")
+
+
+5. Automatización del proceso (Opcional)
+
+Dentro del entorno de Cloud Composer, los archivos del DAG de Airflow se almacenan en un bucket de Google Cloud Storage (GCS) asociado. 
+Vamos a escribir un archivo Python que contenga el DAG, programado para ejecutarse diariamente, y ejecutará el proceso de extracción de datos, 
+detección de anomalías y carga en BigQuery.
+
+# Importar las librerías necesarias de Airflow y Google Cloud
+from airflow import DAG
+from airflow.utils.dates import days_ago
+from airflow.providers.google.cloud.operators.bigquery import BigQueryExecuteQueryOperator
+from airflow.operators.python_operator import PythonOperator
+from google.cloud import bigquery
+import pandas as pd
+from sklearn.ensemble import IsolationForest
+import os
+
+# Configuración del DAG
+default_args = {
+    'owner': 'airflow',
+    'start_date': days_ago(1),
+    'email_on_failure': False,
+    'email_on_retry': False,
+    'retries': 1,
+}
+
+# Definir el DAG
+with DAG(
+    dag_id='anomaly_detection_bt_daily',
+    default_args=default_args,
+    schedule_interval='@daily',  # Se ejecutará diariamente
+    catchup=False,
+) as dag:
+
+    # Función Python para realizar la detección de anomalías
+    def detect_anomalies():
+        client = bigquery.Client()
+
+        # Ejecutar consulta de BigQuery para obtener los datos
+        query = """
+        SELECT
+          ID,
+          Cod_cliente,
+          Fecha,
+          SUM(numero_consultas) AS num_consultas
+        FROM `tu_proyecto.FINANCE.BT`
+        GROUP BY ID, Cod_cliente, Fecha
+        ORDER BY Fecha;
+        """
+
+        df = client.query(query).to_dataframe()
+
+        # Preprocesamiento de los datos
+        df['Fecha'] = pd.to_datetime(df['Fecha'])
+        df = df.sort_values(by='Fecha')
+        df['num_consultas_scaled'] = (df['num_consultas'] - df['num_consultas'].mean()) / df['num_consultas'].std()
+
+        # Entrenar Isolation Forest para detectar anomalías
+        model = IsolationForest(contamination=0.01, random_state=42)
+        df['anomaly'] = model.fit_predict(df[['num_consultas_scaled']])
+
+        # Cargar los resultados a BigQuery
+        table_id = 'tu_proyecto.FINANCE.BT_anomalies'
+        df['Fecha'] = df['Fecha'].astype(str)  # Convertir fecha a string para cargar a BigQuery
+        job = client.load_table_from_dataframe(df, table_id)
+        job.result()
+
+        print("Anomalías detectadas y cargadas a BigQuery")
+
+    # Tarea para ejecutar la detección de anomalías
+    detect_anomalies_task = PythonOperator(
+        task_id='detect_anomalies_task',
+        python_callable=detect_anomalies
+    )
+Explicación del código:
+Imports: Importamos las librerías necesarias, incluidas las relacionadas con Airflow (PythonOperator y BigQueryExecuteQueryOperator), BigQuery y las librerías de machine learning (como IsolationForest de scikit-learn).
+
+Definición del DAG: Configuramos el DAG con una ejecución diaria (@daily). También configuramos los parámetros predeterminados (default_args) para controlar aspectos como el número de reintentos y las notificaciones.
+
+Función de Python: La función detect_anomalies realiza los siguientes pasos:
+
+Conexión a BigQuery.
+Ejecución de una consulta para extraer los datos de la tabla BT.
+Preprocesamiento de los datos (escalado y ordenamiento).
+Entrenamiento de un modelo de Isolation Forest para detectar anomalías.
+Carga de los resultados a una nueva tabla en BigQuery llamada BT_anomalies.
+Tarea de Python: Utilizamos un PythonOperator para ejecutar la tarea detect_anomalies_task, que ejecuta la función de Python que acabamos de definir.
+
+2. Interpretación de cada columna
+ID y Cod_cliente: Te muestran qué cliente realizó la consulta y a qué centro de costo pertenece. Esto es útil para saber quién está involucrado en las consultas.
+
+Fecha: Indica cuándo ocurrió la consulta, lo que te permite analizar tendencias a lo largo del tiempo o ver si las anomalías están concentradas en ciertos períodos.
+
+num_consultas: Este es el número de consultas que un cliente realizó en un día específico. Lo importante aquí es observar si el número de consultas es inusualmente alto o bajo, lo que será detectado por el modelo de anomalías.
+
+num_consultas_scaled: Esta columna contiene los valores de num_consultas, pero normalizados para ajustarse a una distribución más adecuada para el modelo. Esta columna no es relevante para análisis comercial o de negocio, pero es útil para el entendimiento técnico del modelo de detección.
+
+anomaly: Esta es la columna clave que te dirá si una observación (una fila en tu tabla) fue detectada como una anomalía:
+
+1: Normal. El número de consultas realizado en ese día para ese cliente se considera dentro del rango esperado.
+-1: Anomalía. El número de consultas es anormalmente alto o bajo en comparación con el comportamiento histórico de ese cliente o centro de costo.
+3. Interpretación de los Resultados de Anomalías
+¿Qué significa una "anomalía"?
+Una fila marcada con anomaly = -1 significa que el modelo ha identificado esa observación (día, cliente, número de consultas) como inusual en comparación con los patrones normales. Algunas causas podrían ser:
+
+Incremento repentino de consultas: Un cliente que habitualmente hace pocas consultas puede haber realizado un número inusualmente alto en un día específico. Esto podría deberse a algún evento especial, como una campaña de marketing, una auditoría interna, o algún problema en el sistema de facturación que disparó múltiples consultas.
+
+Caída abrupta de consultas: Un cliente que típicamente hace muchas consultas diarias puede haber mostrado una caída abrupta en el uso. Esto podría deberse a un problema técnico, interrupciones en su servicio o cambios en su comportamiento de consumo.
+
+Posibles usos y acciones a tomar:
+Alertar sobre comportamientos inusuales: Si observas anomalías frecuentes en ciertos clientes o centros de costo, podrías investigar si hubo cambios en sus configuraciones, problemas técnicos o nuevos patrones de uso que puedan requerir ajustes en la infraestructura.
+
+Optimización del proceso de facturación: Al identificar patrones anómalos en las consultas, podrías ajustar el sistema de facturación para manejar mejor estos picos o caídas. Por ejemplo, si una anomalía está relacionada con un problema técnico en un cliente, podrías actuar para mejorar la experiencia y prevenir futuras interrupciones.
+
+Segmentación y predicción: Podrías usar estos datos para segmentar clientes en grupos de comportamiento. Por ejemplo, aquellos que tienden a tener más anomalías podrían necesitar un seguimiento más cercano.
+
+
